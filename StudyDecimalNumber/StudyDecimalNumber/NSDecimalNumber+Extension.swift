@@ -7,21 +7,83 @@
 
 import Foundation
 
+public enum RoundType: Int32 {
+    case round // 下一位四舍五入
+    case up // 下一位不是0就进一位
+    case down // 下一位是任何东西都丢掉
+    
+    var decimalRoundType: NSDecimalNumber.RoundingMode {
+        /**
+        plain: 保留位数的下一位四舍五入
+        down: 保留位数的下一位直接舍去
+        up: 保留位数的下一位直接进一位
+        bankers: 当保留位数的下一位不是5时，四舍五入，当保留位数的下一位是5时，其前一位是偶数直接舍去，是奇数直接进位（如果5后面还有数字则直接进位）
+         */
+        switch self {
+        case .round:
+            return .plain
+        case .up:
+            return .up
+        case .down:
+            return .down
+        }
+    }
+    var doubleRoundType: FloatingPointRoundingRule {
+        /**
+         toNearestOrAwayFromZero: 保留位数的下一位四舍五入
+         down: 保留位数的下一位直接舍去
+         up: 保留位数的下一位直接进一位
+         */
+        switch self {
+        case .round:
+            return .toNearestOrAwayFromZero
+        case .up:
+            return .up
+        case .down:
+            return .down
+        }
+    }
+}
 public extension Double {
-    func roundTo(roundType: FloatingPointRoundingRule = .toNearestOrAwayFromZero, decimalCount: Int32) -> Double {
+    func roundTo(decimalCount: Int32, roundType: RoundType = .round) -> Double {
         // 乘以10的要保留的小数位的长度，10^n, 最小只能是保留0位小数
         let divisor = pow(10.0, Double(max(decimalCount, 0)))
         // 获取整数
         let bigDouble: Double = (self * divisor)
         // 截取，通过type，向上截取、向下截取、四舍五入截取只保留整数位
-        let integerDouble = bigDouble.rounded(roundType)
+        let integerDouble = bigDouble.rounded(roundType.doubleRoundType)
         // 回归要保留的小数位
         let result = integerDouble / divisor
         return result
     }
-    func roundToStr(roundType: FloatingPointRoundingRule = .toNearestOrAwayFromZero, decimalCount: Int32) -> String {
-        let result = self.roundTo(roundType: roundType, decimalCount: decimalCount)
-        return "\(result)"
+    func roundToStr(decimalCount: Int32, roundType: RoundType = .round, minZeroCount: Int = 2) -> String {
+        let result = self.roundTo(decimalCount: decimalCount, roundType: roundType)
+        var resultStr = "\(result)"
+        if decimalCount > 0 {
+            // 如果不是整数，设计小数位
+            // 小数位不足，补齐 10.1 -> 10.10
+            var nowCount: Int = 0
+            let list = resultStr.components(separatedBy: ".")
+            if list.count == 2 {
+                let lastStr = list.last ?? ""
+                nowCount = lastStr.count
+            }
+            let disCount = minZeroCount - nowCount
+            if disCount > 0 {
+                if list.count == 2 {
+                    // 之前有小数位
+                    resultStr = resultStr + Array(repeating: "0", count: disCount).joined()
+                } else {
+                    // 之前没有小数位
+                    resultStr = resultStr + "." + Array(repeating: "0", count: disCount).joined()
+                }
+            }
+        } else {
+            // 整数
+            let list = resultStr.components(separatedBy: ".")
+            return list.first ?? "0"
+        }
+        return resultStr
     }
 }
 
@@ -43,7 +105,21 @@ public extension String {
         txt = txt.replacingOccurrences(of: "+", with: "")
         return txt
     }
-    
+    var doubleValue: Double {
+        return Double(self.numberText) ?? 0
+    }
+    var floatValue: Float {
+        return Float(self.doubleValue)
+    }
+    var intValue: Int {
+        return Int(self.numberText) ?? 0
+    }
+    var int32Value: Int32 {
+        return Int32(self.numberText) ?? 0
+    }
+    var int64Value: Int64 {
+        return Int64(self.numberText) ?? 0
+    }
     var decimalNumber: NSDecimalNumber {
         let txt = self.numberText
         if txt.count == 0 {
@@ -56,6 +132,12 @@ public extension String {
             return .zero
         }
         return res
+    }
+    func roundToStr(decimalCount: Int16 = 2, roundType: RoundType = .round) -> NSDecimalNumber {
+        return self.decimalNumber.roundTo(decimalCount: decimalCount, roundType: roundType)
+    }
+    func roundToStr(decimalCount: Int16 = 2, roundType: RoundType = .round, minZeroCount: Int = 2) -> String {
+        return self.decimalNumber.roundToStr(decimalCount: decimalCount, roundType: roundType, minZeroCount: minZeroCount)
     }
 }
 
@@ -121,7 +203,7 @@ public extension NSDecimalNumber {
         return nums.reduce(nums.first ?? .zero, { ($0 < $1) ? $1 : $0 })
     }
     // MARK: - 限制小数位
-    func roundTo(decimalCount: Int16, roundingMode: RoundingMode = .plain) -> NSDecimalNumber {
+    func roundTo(decimalCount: Int16, roundType: RoundType = .round) -> NSDecimalNumber {
         /**
         plain: 保留位数的下一位四舍五入
         down: 保留位数的下一位直接舍去
@@ -136,7 +218,7 @@ public extension NSDecimalNumber {
          */
 
         let behavior = NSDecimalNumberHandler(
-            roundingMode: roundingMode,
+            roundingMode: roundType.decimalRoundType,
             scale: decimalCount,
             raiseOnExactness: false,
             raiseOnOverflow: false,
@@ -145,7 +227,7 @@ public extension NSDecimalNumber {
         let product = multiplying(by: .one, withBehavior: behavior)
         return product
     }
-    func roundToStr(roundingMode: RoundingMode = .plain, decimalCount: Int16 = 2,  minZeroCount: Int = 2) -> String {
+    func roundToStr(decimalCount: Int16 = 2, roundType: RoundType = .round, minZeroCount: Int = 2) -> String {
         /**
         plain: 保留位数的下一位四舍五入
         down: 保留位数的下一位直接舍去
@@ -158,15 +240,26 @@ public extension NSDecimalNumber {
         raiseOnUnderflow: 发生不足错误时是否抛出异常，一般为false
         raiseOnDivideByZero: 除数是0时是否抛出异常，一般为true
          */
-        let result = self.roundTo(decimalCount: decimalCount, roundingMode: roundingMode)
+        let result = self.roundTo(decimalCount: decimalCount, roundType: roundType)
         var resultStr = result.stringValue
         if decimalCount > 0 {
             // 如果不是整数，设计小数位
             // 小数位不足，补齐 10.1 -> 10.10
-            let nowCount = resultStr.components(separatedBy: ".").last?.count ?? 0
+            var nowCount: Int = 0
+            let list = resultStr.components(separatedBy: ".")
+            if list.count == 2 {
+                let lastStr = list.last ?? ""
+                nowCount = lastStr.count
+            }
             let disCount = minZeroCount - nowCount
             if disCount > 0 {
-                resultStr = resultStr + Array(repeating: "0", count: disCount).joined()
+                if list.count == 2 {
+                    // 之前有小数位
+                    resultStr = resultStr + Array(repeating: "0", count: disCount).joined()
+                } else {
+                    // 之前没有小数位
+                    resultStr = resultStr + "." + Array(repeating: "0", count: disCount).joined()
+                }
             }
         }
         return resultStr
